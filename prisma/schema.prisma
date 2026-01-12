@@ -1,0 +1,192 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id        String     @id @db.Uuid
+  name      String
+  email     String     @unique
+  role      Role       @default(EMPLOYEE)
+  createdAt DateTime   @default(now())
+  proposals Proposal[]
+  
+  // IA Agent Relations
+  editais           Edital[]          @relation("EditalCreatedBy")
+  propostasAprovadas PropostaGerada[] @relation("PropostaAprovadoPor")
+}
+
+model Proposal {
+  id        String   @id @default(uuid())
+  title     String
+  createdAt DateTime @default(now())
+  createdBy User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+}
+
+// ============================================================================
+// AI AGENT INFRASTRUCTURE MODELS
+// ============================================================================
+
+model Edital {
+  id         String       @id @default(uuid()) @db.Uuid
+  nome       String
+  arquivoUrl String?      @map("arquivo_url")
+  status     EditalStatus @default(UPLOADED)
+  createdBy  String       @map("created_by") @db.Uuid
+  createdAt  DateTime     @default(now()) @map("created_at")
+  updatedAt  DateTime     @updatedAt @map("updated_at")
+
+  // Relations
+  usuario             User                  @relation("EditalCreatedBy", fields: [createdBy], references: [id], onDelete: Cascade)
+  requisitos          RequisitosExtraidos[]
+  analisesProduto     AnaliseProduto[]
+  precificacao        Precificacao[]
+  proposta            PropostaGerada[]
+  logs                LogProcessamento[]
+
+  @@index([createdBy])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model RequisitosExtraidos {
+  id        String         @id @default(uuid()) @db.Uuid
+  editalId  String         @map("edital_id") @db.Uuid
+  tipo      TipoRequisito
+  conteudo  Json
+  createdAt DateTime       @default(now()) @map("created_at")
+
+  // Relations
+  edital    Edital         @relation(fields: [editalId], references: [id], onDelete: Cascade)
+
+  @@index([editalId])
+}
+
+model ProdutoCatalogo {
+  id              String           @id @default(uuid()) @db.Uuid
+  nome            String           @unique
+  categoria       String
+  descricaoCurta  String?          @map("descricao_curta") @db.Text
+  especificacoes  Json
+  aplicacao       String?          @db.Text
+  observacoes     String?          @db.Text
+  custoBase       Decimal          @map("custo_base") @db.Decimal(10, 2)
+  imagemUrl       String?          @map("imagem_url")
+  pdfUrl          String?          @map("pdf_url")
+  ativo           Boolean          @default(true)
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+
+  // Relations
+  analises        AnaliseProduto[]
+
+  @@index([ativo])
+  @@index([categoria])
+}
+
+model AnaliseProduto {
+  id                String           @id @default(uuid()) @db.Uuid
+  editalId          String           @map("edital_id") @db.Uuid
+  produtoId         String           @map("produto_id") @db.Uuid
+  atendeRequisitos  Boolean          @map("atende_requisitos")
+  justificativa     String?
+  createdAt         DateTime         @default(now()) @map("created_at")
+
+  // Relations
+  edital            Edital           @relation(fields: [editalId], references: [id], onDelete: Cascade)
+  produto           ProdutoCatalogo  @relation(fields: [produtoId], references: [id], onDelete: Cascade)
+
+  @@index([editalId])
+  @@index([produtoId])
+}
+
+model Precificacao {
+  id          String   @id @default(uuid()) @db.Uuid
+  editalId    String   @map("edital_id") @db.Uuid
+  custo       Decimal  @db.Decimal(10, 2)
+  impostos    Decimal  @db.Decimal(10, 2)
+  frete       Decimal  @db.Decimal(10, 2)
+  margem      Decimal  @db.Decimal(5, 2)
+  valorFinal  Decimal  @map("valor_final") @db.Decimal(10, 2)
+  explicacao  String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  // Relations
+  edital      Edital   @relation(fields: [editalId], references: [id], onDelete: Cascade)
+
+  @@index([editalId])
+}
+
+model PropostaGerada {
+  id                 String          @id @default(uuid()) @db.Uuid
+  editalId           String          @map("edital_id") @db.Uuid
+  conteudoTecnico    String?         @map("conteudo_tecnico") @db.Text
+  conteudoComercial  String?         @map("conteudo_comercial") @db.Text
+  status             PropostaStatus  @default(DRAFT)
+  aprovadoPor        String?         @map("aprovado_por") @db.Uuid
+  createdAt          DateTime        @default(now()) @map("created_at")
+  updatedAt          DateTime        @updatedAt @map("updated_at")
+
+  // Relations
+  edital             Edital          @relation(fields: [editalId], references: [id], onDelete: Cascade)
+  aprovador          User?           @relation("PropostaAprovadoPor", fields: [aprovadoPor], references: [id], onDelete: SetNull)
+
+  @@index([editalId])
+  @@index([status])
+}
+
+model LogProcessamento {
+  id        String   @id @default(uuid()) @db.Uuid
+  editalId  String   @map("edital_id") @db.Uuid
+  etapa     String
+  mensagem  String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  edital    Edital   @relation(fields: [editalId], references: [id], onDelete: Cascade)
+
+  @@index([editalId])
+  @@index([createdAt])
+}
+
+// ============================================================================
+// ENUMS
+// ============================================================================
+
+enum Role {
+  EMPLOYEE
+  ADMIN
+}
+
+enum EditalStatus {
+  UPLOADED
+  PROCESSING
+  REQUIREMENTS_EXTRACTED
+  PRODUCT_SELECTED
+  PRICED
+  PROPOSAL_GENERATED
+  READY_FOR_REVIEW
+  APPROVED
+  REJECTED
+}
+
+enum TipoRequisito {
+  TECNICO
+  COMERCIAL
+}
+
+enum PropostaStatus {
+  DRAFT
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+}
